@@ -2,6 +2,7 @@ import express from 'express';
 import orderRoutes from './routes/orderRoutes';
 import cors from 'cors'
 import Consumer from './rabbitmq/consumer';
+import { rabbitMQ } from './rabbitmq/connection';
 
 const app = express();
 app.use(express.json());
@@ -14,11 +15,14 @@ const corsOptions = {
 
   (async () => {
     try {
+      await rabbitMQ.initialize();
+      console.log('RabbitMQ is ready for operations.');
       await Consumer.consumePaymentSuccess();
       await Consumer.consumePaymentFailed();
-      console.log('RabbitMQ consumers are running.');
+      
     } catch (error) {
-      console.error('Failed to start RabbitMQ consumers:', error);
+      console.error('Failed to initialize RabbitMQ:', error);
+      process.exit(1);
     }
   })();
   

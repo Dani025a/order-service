@@ -3,21 +3,25 @@ import orderService from '../services/orderService';
 import { publishStockUpdateOnFailed } from './publisher';
 
 class Consumer {
-  static async consumeStockUpdated(queue: string, onMessage: (message: any) => void): Promise<void> {
+  static async consumeStockUpdated(replyQueue: string, callback: (msg: any) => void): Promise<void> {
     await rabbitMQ.initialize();
     const channel = rabbitMQ.getChannel();
 
-    await channel.assertQueue(queue, { durable: true });
-    await channel.consume(queue, (msg) => {
-      if (msg) {
-        const data = JSON.parse(msg.content.toString());
-        onMessage(data);
-        channel.ack(msg);
-      }
-    });
+    await channel.assertQueue(replyQueue, { durable: false });
 
-    console.log(`Consumer bound to queue: ${queue} for stock updated messages.`);
+    channel.consume(
+      replyQueue,
+      (msg) => {
+        if (msg) {
+          callback(msg);
+        }
+      },
+      { noAck: true }
+    );
+
+    console.log(`Consuming messages from reply queue: ${replyQueue}`);
   }
+
 
   static async consumeReservationFailed(queue: string, onMessage: (message: any) => void): Promise<void> {
     await rabbitMQ.initialize();
