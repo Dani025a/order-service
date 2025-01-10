@@ -1,32 +1,31 @@
-import RabbitMQ from './connection';
+import { rabbitMQ } from "./connection";
 
-class Publisher {
-  static async orderCreated(event: {
-    id: string;
-    userid: number;
-    products: any[];
-    totalPrice: number;
-    totalDiscountedPrice: number;
-    currency: string;
-  }) {
-    console.log('orderCreated event triggered with data:', event);
-    await this.publish('order.exchange', 'order.created', event);
-  }
+const EXCHANGE_NAME = "stock_update_on_failed"
 
-  private static async publish(exchange: string, routingKey: string, message: object) {
-    try {
-      const channel = await RabbitMQ.connect();
-      console.log(`Publishing to exchange: ${exchange}, routingKey: ${routingKey}`);
-      console.log('Message:', message);
+export const publishStockUpdateOnFailed = async (message: any): Promise<void> => {
+  const channel = rabbitMQ.getChannel();
+  await channel.assertExchange(EXCHANGE_NAME, 'fanout', { durable: true });
+  channel.publish(EXCHANGE_NAME, "", Buffer.from(message));
+  console.log(`Message published to exchange ${EXCHANGE_NAME}: ${message}`);
+};
 
-      channel.publish(exchange, routingKey, Buffer.from(JSON.stringify(message)), { persistent: true });
+export const publishProductValidation = async (message: any, correlationId: string, replyTo: string): Promise<void> => {
+  await rabbitMQ.initialize();
+  const channel = rabbitMQ.getChannel();
 
-      console.log('Message published successfully.');
-    } catch (error) {
-      console.error('Error publishing message:', error);
-      throw error; 
+  const exchange = 'product.validation';
+
+  await channel.assertExchange(exchange, 'direct', { durable: true });
+
+  channel.publish(
+    exchange,
+    '',
+    Buffer.from(JSON.stringify(message)),
+    {
+      correlationId,
+      replyTo,
     }
-  }
-}
+  );
 
-export default Publisher;
+  console.log(`Message published to exchange ${exchange}:`, message);
+};

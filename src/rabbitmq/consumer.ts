@@ -1,49 +1,78 @@
+import { rabbitMQ } from './connection';
 import orderService from '../services/orderService';
-import RabbitMQ from './connection';
+import { publishStockUpdateOnFailed } from './publisher';
 
-export const startConsumers = async () => {
-  const channel = await RabbitMQ.connect();
+class Consumer {
+  static async consumeStockUpdated(queue: string, onMessage: (message: any) => void): Promise<void> {
+    await rabbitMQ.initialize();
+    const channel = rabbitMQ.getChannel();
 
-  const consumers = [
-    {
-      queue: 'order.completed.queue',
-      exchange: 'order.exchange',
-      routingKey: 'order.completed',
-      handler: orderService.handleOrderCompleted,
-    },
-    {
-      queue: 'order.failed.queue',
-      exchange: 'order.exchange',
-      routingKey: 'order.failed',
-      handler: orderService.handleOrderFailed,
-    },
-    {
-      queue: 'product.validation.reply.queue',
-      exchange: 'product.exchange',
-      routingKey: 'product.validation.reply',
-      handler: async (data: any) => {
-        console.log('Received validation reply:', data);
-      },
-    },
-  ];
-
-  for (const { queue, exchange, routingKey, handler } of consumers) {
     await channel.assertQueue(queue, { durable: true });
-    await channel.bindQueue(queue, exchange, routingKey);
-
-    channel.consume(queue, async (message: any) => {
-      if (message) {
-        try {
-          const data = JSON.parse(message.content.toString());
-          await handler(data);
-          channel.ack(message);
-        } catch (error) {
-          console.error(`Error processing message from ${queue}:`, error);
-          channel.nack(message, false, false);
-        }
+    await channel.consume(queue, (msg) => {
+      if (msg) {
+        const data = JSON.parse(msg.content.toString());
+        onMessage(data);
+        channel.ack(msg);
       }
     });
 
-    console.log(`Listening on queue: ${queue}, exchange: ${exchange}, routingKey: ${routingKey}`);
+    console.log(`Consumer bound to queue: ${queue} for stock updated messages.`);
   }
-};
+
+  static async consumeReservationFailed(queue: string, onMessage: (message: any) => void): Promise<void> {
+    await rabbitMQ.initialize();
+    const channel = rabbitMQ.getChannel();
+
+    await channel.assertQueue(queue, { durable: true });
+    await channel.consume(queue, (msg) => {
+      if (msg) {
+        const data = JSON.parse(msg.content.toString());
+        onMessage(data);
+        channel.ack(msg);
+      }
+    });
+
+    console.log(`Consumer bound to queue: ${queue} for reservation failed messages.`);
+  }
+
+  static async consumePaymentSuccess(): Promise<void> {
+    await rabbitMQ.initialize();
+    const channel = rabbitMQ.getChannel();
+
+    const queue = 'payment_success_queue';
+    await channel.assertQueue(queue, { durable: true });
+    await channel.consume(queue, async (msg) => {
+      if (msg) {
+        const data = JSON.parse(msg.content.toString());
+        await orderService.handleOrderCompleted(data);
+        channel.ack(msg);
+      }
+    });
+
+    console.log(`Consumer bound to queue: ${queue} for payment success messages.`);
+  }
+
+  static async consumePaymentFailed(): Promise<void> {
+    await rabbitMQ.initialize();
+    const channel = rabbitMQ.getChannel();
+
+    const queue = 'payment_failed_queue';
+    await channel.assertQueue(queue, { durable: true });
+    await channel.consume(queue, async (msg) => {
+      if (msg) {
+        const data = JSON.parse(msg.content.toString());
+        const order = await orderService.handleOrderFailed(data);
+
+        if (order) {
+          await publishStockUpdateOnFailed(order);
+        }
+
+        channel.ack(msg);
+      }
+    });
+
+    console.log(`Consumer bound to queue: ${queue} for payment failed messages.`);
+  }
+}
+
+export default Consumer;
